@@ -4,6 +4,7 @@ on:
     branches: ['master']
   pull_request:
     branches: ['master']
+  workflow_dispatch:
 permissions:
   contents: read
 
@@ -41,6 +42,51 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.86.0
         id: toolchain
       - run: cargo test
+
+  corpus:
+    name: Corpus test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      NVIM_TS_DIR: .test/nvim-treesitter
+    steps:
+      - uses: actions/checkout@v4
+      - uses: tree-sitter/setup-action/cli@v1
+      - uses: dtolnay/rust-toolchain@1.86.0
+        id: toolchain
+
+      - name: Compile
+        run: |
+          cargo build
+          echo ${{ github.workspace }}/target/debug >> $GITHUB_PATH
+
+      - name: Clone nvim-treesitter runtime corpus
+        uses: actions/checkout@v4
+        with:
+          repository: nvim-treesitter/nvim-treesitter
+          ref: main
+          path: ${{ env.NVIM_TS_DIR }}
+
+      - name: Compile parsers
+        working-directory: ${{ env.NVIM_TS_DIR }}
+        run: |
+          bash ./scripts/ci-install.sh
+          nvim -l ./scripts/install-parsers.lua
+
+      - name: Setup parsers cache
+        id: parsers-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/nvim/site/parser/
+          key: parsers-${{ hashFiles('${{ env.NVIM_TS_DIR }}/lua/nvim-treesitter/parsers.lua') }}
+
+      - name: Check corpus
+        working-directory: ${{ env.NVIM_TS_DIR }}
+        run: ts_query_ls check runtime/queries
+
+      - name: Format corpus
+        working-directory: ${{ env.NVIM_TS_DIR }}
+        run: ts_query_ls format runtime/queries
 
   generate-schema:
     name: Generate schema
